@@ -13,16 +13,26 @@ public class TelemetryGenerator {
     private static final int NUM_USERS = 10;
     private static final int SESSIONS_PER_USER = 20; // total sessions per user
     private static final double MALICIOUS_RATE = 0.10; // 10%
-    private static final String OUT_FILE = "telemetry_raw.jsonl";
+    private static final String OUT_FILE = "telemetry_raw.csv";
 
     private static final String[] DOMAIN_CATEGORIES = {
         "email", "shopping", "social", "news", "dev", "finance", "health", "travel"
     };
 
+    // Column order = BoundaryOne schema
+    private static final String CSV_HEADER
+            = "user_id,session_id,timestamp,session_duration_sec,domain_category,domain_risk_score,redirect_count,"
+            + "dwell_time_sec,download_flag,click_count,typing_events,login_failures,mfa_challenge,new_device_login,label_malicious";
+
     public static void main(String[] args) throws IOException {
         Random rng = new Random(67); // SIX SEVENNNN
 
         try (BufferedWriter w = new BufferedWriter(new FileWriter(OUT_FILE))) {
+
+            // Write header once
+            w.write(CSV_HEADER);
+            w.newLine();
+
             int sessionCounter = 1;
 
             for (int u = 1; u <= NUM_USERS; u++) {
@@ -74,7 +84,13 @@ public class TelemetryGenerator {
                         newDeviceLogin = rng.nextDouble() < 0.3;
                     }
 
-                    String jsonLine = toJsonLine(
+                    // If later you need nulls, set these wrappers to null instead of values:
+                    Integer dwellTimeNullable = dwellTimeSec;
+                    Boolean downloadNullable = downloadFlag;
+                    Integer clickNullable = clickCount;
+                    Integer typingNullable = typingEvents;
+
+                    String csvRow = toCsvRow(
                             userId,
                             sessionId,
                             ts.format(ISO),
@@ -82,17 +98,17 @@ public class TelemetryGenerator {
                             domainCategory,
                             domainRiskScore,
                             redirectCount,
-                            dwellTimeSec,
-                            downloadFlag,
-                            clickCount,
-                            typingEvents,
+                            dwellTimeNullable,
+                            downloadNullable,
+                            clickNullable,
+                            typingNullable,
                             loginFailures,
                             mfaChallenge,
                             newDeviceLogin,
                             malicious ? 1 : 0
                     );
 
-                    w.write(jsonLine);
+                    w.write(csvRow);
                     w.newLine();
                 }
             }
@@ -101,42 +117,79 @@ public class TelemetryGenerator {
         System.out.println("Wrote " + OUT_FILE);
     }
 
-    private static String toJsonLine(
+    private static String toCsvRow(
             String userId,
             String sessionId,
             String timestamp,
-            int sessionDurationSec,
+            Integer sessionDurationSec,
             String domainCategory,
-            double domainRiskScore,
-            int redirectCount,
-            int dwellTimeSec,
-            boolean downloadFlag,
-            int clickCount,
-            int typingEvents,
-            int loginFailures,
-            boolean mfaChallenge,
-            boolean newDeviceLogin,
-            int labelMalicious
+            Double domainRiskScore,
+            Integer redirectCount,
+            Integer dwellTimeSec,
+            Boolean downloadFlag,
+            Integer clickCount,
+            Integer typingEvents,
+            Integer loginFailures,
+            Boolean mfaChallenge,
+            Boolean newDeviceLogin,
+            Integer labelMalicious
     ) {
-        // Minimal JSON builder (no external libraries).
-        // Assumes our strings are safe (we control userId/sessionId/category).
-        return "{"
-                + "\"user_id\":\"" + userId + "\","
-                + "\"session_id\":\"" + sessionId + "\","
-                + "\"timestamp\":\"" + timestamp + "\","
-                + "\"session_duration_sec\":" + sessionDurationSec + ","
-                + "\"domain_category\":\"" + domainCategory + "\","
-                + "\"domain_risk_score\":" + domainRiskScore + ","
-                + "\"redirect_count\":" + redirectCount + ","
-                + "\"dwell_time_sec\":" + dwellTimeSec + ","
-                + "\"download_flag\":" + downloadFlag + ","
-                + "\"click_count\":" + clickCount + ","
-                + "\"typing_events\":" + typingEvents + ","
-                + "\"login_failures\":" + loginFailures + ","
-                + "\"mfa_challenge\":" + mfaChallenge + ","
-                + "\"new_device_login\":" + newDeviceLogin + ","
-                + "\"label_malicious\":" + labelMalicious
-                + "}";
+        // CSV rules:
+        // - null => empty field
+        // - booleans => 0/1
+        // - quote strings if they contain comma/quote/newline (not expected here, but safe)
+        return joinCsv(
+                csvStr(userId),
+                csvStr(sessionId),
+                csvStr(timestamp),
+                csvNum(sessionDurationSec),
+                csvStr(domainCategory),
+                csvNum(domainRiskScore),
+                csvNum(redirectCount),
+                csvNum(dwellTimeSec),
+                csvBool(downloadFlag),
+                csvNum(clickCount),
+                csvNum(typingEvents),
+                csvNum(loginFailures),
+                csvBool(mfaChallenge),
+                csvBool(newDeviceLogin),
+                csvNum(labelMalicious)
+        );
+    }
+
+    private static String joinCsv(String... fields) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < fields.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(fields[i]);
+        }
+        return sb.toString();
+    }
+
+    private static String csvNum(Number n) {
+        return (n == null) ? "" : n.toString();
+    }
+
+    private static String csvBool(Boolean b) {
+        if (b == null) {
+            return "";
+        }
+        return b ? "1" : "0";
+    }
+
+    private static String csvStr(String s) {
+        if (s == null) {
+            return "";
+        }
+        // Escape if needed
+        boolean needsQuoting = s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r");
+        if (!needsQuoting) {
+            return s;
+        }
+        String escaped = s.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
     }
 
     private static int clamp(int x, int lo, int hi) {
